@@ -18,7 +18,7 @@ const pool = mysql.createPool({
   database: process.env.DB_DATABASE,
   port: process.env.DB_PORT,
   waitForConnections: true,
-  connectionLimit: process.env.DB_CONNECTION_LIMIT || 10,
+  connectionLimit: process.env.DB_CONNECTION_LIMIT || 50,
   queueLimit: 0,
   connectTimeout: 30000,
   acquireTimeout: 30000,
@@ -28,7 +28,6 @@ const pool = mysql.createPool({
 pool.getConnection((err, connection) => {
   if (err) {
     console.error('Error connecting to the database:', err.message);
-    console.error('Error code:', err.code);
     process.exit(1);
   } else {
     console.log('Database connected successfully!');
@@ -38,29 +37,37 @@ pool.getConnection((err, connection) => {
 
 // Search Endpoint
 app.post('/search', async (req, res) => {
-  const { query } = req.body;
+  const { query, limit = 50, offset = 0 } = req.body;
 
   try {
     const promises = [
       pool.promise().query(
-        `SELECT * FROM ch_all_companies_own_property
-         WHERE \`Title Number\` LIKE ? OR \`Property Address\` LIKE ? OR \`District\` LIKE ? 
-           OR \`County\` LIKE ? OR \`Region\` LIKE ? OR \`Postcode\` LIKE ? 
-           OR \`Proprietor Name (1)\` LIKE ? OR \`Proprietor Name (2)\` LIKE ?`,
-        [`%${query}%`, `%${query}%`, `%${query}%`, `%${query}%`, `%${query}%`, `%${query}%`, `%${query}%`, `%${query}%`]
+        `SELECT * 
+         FROM ch_all_companies_own_property
+         WHERE \`Title Number\` = ? 
+            OR \`Proprietor Name (1)\` = ? 
+            OR \`Proprietor Name (2)\` = ? 
+            OR \`County\` = ?
+         LIMIT ? OFFSET ?`,
+        [query, query, query, query, limit, offset]
       ),
       pool.promise().query(
-        `SELECT * FROM overseas_companies_holding_uk_property
-         WHERE \`Title Number\` LIKE ? OR \`Property Address\` LIKE ? OR \`District\` LIKE ? 
-           OR \`County\` LIKE ? OR \`Region\` LIKE ? OR \`Postcode\` LIKE ? 
-           OR \`Proprietor Name (1)\` LIKE ? OR \`Proprietor Name (2)\` LIKE ?`,
-        [`%${query}%`, `%${query}%`, `%${query}%`, `%${query}%`, `%${query}%`, `%${query}%`, `%${query}%`, `%${query}%`]
+        `SELECT * 
+         FROM overseas_companies_holding_uk_property
+         WHERE \`Title Number\` = ? 
+            OR \`Proprietor Name (1)\` = ? 
+            OR \`Proprietor Name (2)\` = ? 
+            OR \`County\` = ?
+         LIMIT ? OFFSET ?`,
+        [query, query, query, query, limit, offset]
       ),
       pool.promise().query(
-        `SELECT * FROM public_house_registered_as_a_company
-         WHERE \`CompanyName\` LIKE ? OR \`RegAddress.AddressLine1\` LIKE ? OR \`RegAddress.AddressLine2\` LIKE ? 
-           OR \`RegAddress.PostTown\` LIKE ? OR \`RegAddress.County\` LIKE ? OR \`RegAddress.PostCode\` LIKE ?`,
-        [`%${query}%`, `%${query}%`, `%${query}%`, `%${query}%`, `%${query}%`, `%${query}%`]
+        `SELECT * 
+         FROM public_house_registered_as_a_company
+         WHERE \`CompanyNumber\` IN (?, ?)
+            OR \`CompanyName\` IN (?, ?)
+         LIMIT ? OFFSET ?`,
+        [query, query, query, query, limit, offset]
       ),
     ];
 
@@ -72,8 +79,12 @@ app.post('/search', async (req, res) => {
       publicHouseRegistered: publicHouseRegistered[0],
     });
   } catch (err) {
-    console.error('Error fetching data:', err.message);
-    res.status(500).send({ error: 'Error searching the database' });
+    console.error('Error fetching data:', {
+      message: err.message,
+      stack: err.stack,
+      queryParams: req.body,
+    });
+    res.status(500).send({ error: 'Database query failed. Please try again.' });
   }
 });
 
