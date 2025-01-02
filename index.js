@@ -2,7 +2,7 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const mysql = require('mysql2');
-require('dotenv').config(); // Load environment variables
+require('dotenv').config();
 
 const app = express();
 const port = 5000;
@@ -37,54 +37,76 @@ pool.getConnection((err, connection) => {
 
 // Search Endpoint
 app.post('/search', async (req, res) => {
-  const { query, limit = 50, offset = 0 } = req.body;
+  const { searchType, query, limit = 50, offset = 0 } = req.body;
+
+  if (!query) {
+    return res.status(400).json({ error: 'Query parameter is required.' });
+  }
+
+  console.log({searchType, query});
+  
 
   try {
-    const promises = [
-      pool.promise().query(
-        `SELECT * 
-         FROM ch_all_companies_own_property
-         WHERE \`Title Number\` = ? 
-            OR \`Proprietor Name (1)\` = ? 
-            OR \`Proprietor Name (2)\` = ? 
-            OR \`County\` = ?
-         LIMIT ? OFFSET ?`,
-        [query, query, query, query, limit, offset]
-      ),
-      pool.promise().query(
-        `SELECT * 
-         FROM overseas_companies_holding_uk_property
-         WHERE \`Title Number\` = ? 
-            OR \`Proprietor Name (1)\` = ? 
-            OR \`Proprietor Name (2)\` = ? 
-            OR \`County\` = ?
-         LIMIT ? OFFSET ?`,
-        [query, query, query, query, limit, offset]
-      ),
-      pool.promise().query(
+    let results = [];
+    if (searchType === 'title_number') {
+
+      console.log("Title Number");
+
+      const [ownPropertyResults, overseasResults] = await Promise.all([
+        pool.promise().query(
+          `SELECT * 
+           FROM ch_all_companies_own_property
+           WHERE \`Title Number\` = ?
+           LIMIT ? OFFSET ?`,
+          [query, limit, offset]
+        ),
+        pool.promise().query(
+          `SELECT * 
+           FROM overseas_companies_holding_uk_property
+           WHERE \`Title Number\` = ?
+           LIMIT ? OFFSET ?`,
+          [query, limit, offset]
+        ),
+      ]);
+      results = [...ownPropertyResults[0], ...overseasResults[0]];
+      console.log(results);
+
+    } else if (searchType === 'company_number') {    
+      
+      console.log("Compnay Number");
+      
+      const [companyResults] = await pool.promise().query(
         `SELECT * 
          FROM public_house_registered_as_a_company
-         WHERE \`CompanyNumber\` IN (?, ?)
-            OR \`CompanyName\` IN (?, ?)
+         WHERE \`CompanyNumber\` = ?
          LIMIT ? OFFSET ?`,
-        [query, query, query, query, limit, offset]
-      ),
-    ];
+        [query, limit, offset]
+      );
+      results = companyResults;
+      console.log(results);
 
-    const [companiesOwnProperty, overseasCompaniesHoldingProperty, publicHouseRegistered] = await Promise.all(promises);
+    } else if (searchType === 'company_name') {
+      
+      console.log("Compnay Name");
 
-    res.json({
-      companiesOwnProperty: companiesOwnProperty[0],
-      overseasCompaniesHoldingProperty: overseasCompaniesHoldingProperty[0],
-      publicHouseRegistered: publicHouseRegistered[0],
-    });
+      const [nameResults] = await pool.promise().query(
+        `SELECT * 
+         FROM public_house_registered_as_a_company
+         WHERE \`CompanyName\` LIKE ?
+         LIMIT ? OFFSET ?`,
+        [`%${query}%`, limit, offset]
+      );
+      results = nameResults;
+      console.log(results);
+      
+    } else {
+      return res.status(400).json({ error: 'Invalid search type' });
+    }
+
+    res.json({ results });
   } catch (err) {
-    console.error('Error fetching data:', {
-      message: err.message,
-      stack: err.stack,
-      queryParams: req.body,
-    });
-    res.status(500).send({ error: 'Database query failed. Please try again.' });
+    console.error('Error fetching data:', err);
+    res.status(500).json({ error: 'Database query failed. Please try again later.' });
   }
 });
 
