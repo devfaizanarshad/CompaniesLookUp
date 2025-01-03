@@ -37,7 +37,7 @@ pool.getConnection((err, connection) => {
 
 // Search Endpoint
 app.post('/search', async (req, res) => {
-  const { searchType, query, limit = 50, offset = 0 } = req.body;
+  const { searchType, query, limit = 100, offset = 0 } = req.body;
 
   if (!query) {
     return res.status(400).json({ error: 'Query parameter is required.' });
